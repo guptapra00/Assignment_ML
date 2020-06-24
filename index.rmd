@@ -1,115 +1,155 @@
-title: "Assignment_ML"
-author: "Prakhar Gupta"
-date: "6/23/2020"
+title: Assignment_ML
+author: "by Prakhar Gupta"
+output:
+  html_document:
+    keep_md: true
+    fig_height: 9
+    fig_width: 9
 ---
 
+### Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: * * * http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
 
 
-```
+### Data
+
+The training data for this project are available here:
+
+* https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+* https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har. If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment.
 
 
-## ApProach
+## Environment Preparation
 
-Our outcome variable is classe, a factor variable. For this data set, “participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in 5 different fashions: - exactly according to the specification (Class A) - throwing the elbows to the front (Class B) - lifting the dumbbell only halfway (Class C) - lowering the dumbbell only halfway (Class D) - throwing the hips to the front (Class E)
+Load all the required libraries
 
-Two models will be tested using decision tree and random forest. The model with the highest accuracy will be chosen as our final model.
-
----
-
-## Cross-validation
-
-Cross-validation will be performed by subsampling our training data set randomly without replacement into 2 subsamples: TrainTrainingSet data (75% of the original Training data set) and TestTrainingSet data (25%). Our models will be fitted on the TrainTrainingSet data set, and tested on the TestTrainingSet data. Once the most accurate model is choosen, it will be tested on the original Testing data set.
-
-
----
-
-## Expected out-of-sample error
-
-The expected out-of-sample error will correspond to the quantity: 1-accuracy in the cross-validation data. Accuracy is the proportion of correct classified observation over the total sample in the TestTrainingSet data set. Expected accuracy is the expected accuracy in the out-of-sample data set (i.e. original testing data set). Thus, the expected value of the out-of-sample error will correspond to the expected number of missclassified observations/total observations in the Test data set, which is the quantity: 1-accuracy found from the cross-validation data set.
-
-Our outcome variable “classe” is a factor variable. We split the Training dataset into TrainTrainingSet and TestTrainingSet datasets.
-
-Install packages and load the required libraries
-
-
-```{r }
-
-library(lattice); library(ggplot2); library(caret); library(randomForest); library(rpart); library(rpart.plot);
-
+```{r, cache = T}
+library(knitr)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+library(randomForest)
+library(corrplot)
+library(RColorBrewer)
 set.seed(1234)
+```
 
-# data load and clean up
-trainingset <- read.csv("pml-training.csv", na.strings=c("NA","#DIV/0!", ""))
-testingset <- read.csv("pml-testing.csv", na.strings=c("NA","#DIV/0!", ""))
+### Read the Data
+After downloading the data from the data source, read the two csv files 
 
-# Perform exploratory analysis - 
- dim(trainingset); dim(testingset); summary(trainingset); summary(testingset); str(trainingset); str(testingset); head(trainingset); head(testingset); 
- 
- # Delete columns with all missing values
-trainingset<-trainingset[,colSums(is.na(trainingset)) == 0]
-testingset <-testingset[,colSums(is.na(testingset)) == 0]
+```{r, cache = T}
+training  <- 'pml-training.csv'
+quizdata   <- 'pml-testing.csv'
+train_data <- read.csv(training, strip.white = TRUE, na.strings = c("NA",""))
+quiz_data  <- read.csv(quizdata,  strip.white = TRUE, na.strings = c("NA",""))
+dim(train_data)
+dim(quiz_data)
+```
 
-# Delete variables are irrelevant to our current project: user_name, raw_timestamp_part_1, raw_timestamp_part_,2 cvtd_timestamp, new_window, and  num_window (columns 1 to 7). 
-trainingset   <-trainingset[,-c(1:7)]
-testingset <-testingset[,-c(1:7)]
+The training data set contains 19622 observations and 160 variables and testing data set contains 20 observations and 160 variables.
 
-# partition the data so that 75% of the training dataset into training and the remaining 25% to testing
-traintrainset <- createDataPartition(y=trainingset$classe, p=0.75, list=FALSE)
-TrainTrainingSet <- trainingset[traintrainset, ] 
-TestTrainingSet <- trainingset[-traintrainset, ]
+### partitioned the train data 
 
-# The variable "classe" contains 5 levels: A, B, C, D and E. A plot of the outcome variable will allow us to see the frequency of each levels in the TrainTrainingSet data set and # compare one another.
+I’ll split the training data into training and testing partitions and use the pml-testing.csv as a validation sample
 
-plot(TrainTrainingSet$classe, col="yellow", main="Plot of levels of variable classe within the TrainTrainingSet data set", xlab="classe", ylab="Frequency",ylim=5000)
+```{r, cache = T}
+set.seed(127)
+in_train  <- createDataPartition(train_data$classe, p=0.75, list=FALSE)
+train_set <- train_data[ in_train, ]
+test_set  <- train_data[-in_train, ]
+dim(train_set)
+dim(test_set)
+```
 
-#Based on the graph above, we can see that each level frequency is within the same order of magnitude of each other. Level A is the most frequent while level D is the least frequent.
+### Clean Data 
+
+There are  plenty of NA, that can be removed with the cleaning procedures below. The Near Zero variance (NZV) variables are also removed and the ID variables as well.
+
+```{r, cache=T}
+nzv_var <- nearZeroVar(train_set)
+train_set <- train_set[ , -nzv_var]
+test_set  <- test_set [ , -nzv_var]
+dim(train_set)
+dim(test_set)
+```
+## Remove variables that are NA. A threshlod of 95 % is selected.
+
+```{r, cache=T}
+allna    <- sapply(train_set, function(x) mean(is.na(x))) > 0.95
+train_set <- train_set[, allna==FALSE]
+test_set  <- test_set[, allna==FALSE]
+dim(train_set)
+dim(test_set)
+```
+
+##remove identification  variables (columns 1 to 5)
+
+```{r, cache=T}
+train_set <- train_set[, -(1:5)]
+test_set  <- test_set[, -(1:5)]
+dim(train_set)
+dim(test_set)
+```
+
+As per the cleaning process above, the number of variables for the analysis has been reduced to 54 only.
+
+
+### Correlation Analysis
+
+A correlation matrix among variables.Select “FPC” for the first principal component order. 
+
+```{r, cache=T}
+corrmatrix <-cor(train_set[, -length(names(train_set))])
+corrplot(corrmatrix, order = "FPC", method = "color", type = "lower", 
+         tl.cex = 0.8, tl.col = rgb(0, 0, 0))
 ```
 
 
----
+The highly correlated variables are shown in dark colors in the graph above.The  highly correlated their colors are either dark blue (for a positive correlation) or dark red (for a negative corraltions).
 
-## Prediction model 1: Decision Tree
+### Prediction Model 
 
+Three methods will be applied to model the regressions (in the Train dataset) and the best one (with higher accuracy when applied to the Quiz dataset) will be used for the quiz predictions. 
 
-```{r }
-model1 <- rpart(classe ~ ., data=TrainTrainingSet, method="class")
+The methods are: 
+* Random Forests, 
+* Decision Tree and 
+* Generalized Boosted Model described below.
 
-prediction1 <- predict(model1, TestTrainingSet, type = "class")
+A Confusion Matrix is plotted at the end of each analysis for better visualize the accuracy of the models.
 
-# Plot the Decision Tree
-rpart.plot(model1, main="Classification Tree", extra=102, under=TRUE, faclen=0)
+## A)Random Forest
+
+* use Random Forest method with Cross Validation, 3 folds
+* number =3 is # folds of the training data
+* Cross Validation achieved with trainControl method set to “cv”
+* ntree =250 is the number of tree 
+
+```{r, cache=T}
+#model fit
+set.seed(1234)
+controlRF <- trainControl(method="cv", number=3, verboseIter=FALSE)
+modelRf  <- train(classe ~ ., data=train_set, method="rf",
+                          trControl=controlRF,ntree=250)
+modelRf$finalModel
+# prediction on Test dataset
+#Check the accuracy of the model by comparing the predictions to the actual results
+predictRf <- predict(modelRf, newdata=test_set)
+confMatRandForest <- confusionMatrix(predictRf, test_set$classe)
+confMatRandForest
+accuracy <- postResample(predictRf, test_set$classe)
+accuracy
+outof_sample_error <- 1 - as.numeric(confusionMatrix(test_set$classe, predictRf)$overall[1])
+outof_sample_error
+#plot matrix results
+plot(confMatRandForest$table, col = confMatRandForest$byClass, 
+     main = paste("Random Forest - Accuracy =",
+                  round(confMatRandForest$overall['Accuracy'], 4)))
 ```
-
----
-
-## Prediction model 2: Random Forest
-
-
-```{r }
-library(caret);library(randomForest)
-model2 <- train(classe ~. , data=TrainTrainingSet, method="rf",prox=TRUE)
-# Predicting:
-prediction2 <- predict(model2, TestTrainingSet, type = "class")
-
-# Test results on TestTrainingSet data set:
-#confusionMatrix(prediction2, TestTrainingSet$classe)
-```
-
----
-
-## Decision on which Prediction Model to Use:
-
-
-Random Forest algorithm performed better than Decision Trees. Accuracy for Random Forest model was 0.995 (95% CI: (0.993, 0.997)) compared to Decision Tree model with 0.739 (95% CI: (0.727, 0.752)). The Random Forests model is choosen. The expected out-of-sample error is estimated at 0.005, or 0.5%.
-
-
-```{r centers,}
-library(ggplot2)
-irisP <- classCenter(training[,c(3,4)], training$Species, modFit$finalModel$prox)
-irisP <- as.data.frame(irisP); irisP$Species <- rownames(irisP)
-p <- qplot(Petal.Width, Petal.Length, col=Species,data=training)
-p + geom_point(aes(x=Petal.Width,y=Petal.Length,col=Species),size=5,shape=4,data=irisP)
-```
-
----
-
